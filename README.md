@@ -1,3 +1,6 @@
+Thanks nanni2810-ux/moonlight-N3DS
+I literally changed nothing all I did was actually publish the cia file.
+
 # Moonlight for the \*New\* Nintendo 3DS
 
 Moonlight is an open source client for [Sunshine](https://github.com/LizardByte/Sunshine) and NVIDIA GameStream for the \*New\* Nintendo 3DS, forked from [Moonlight Embedded](https://github.com/moonlight-stream/moonlight-embedded). Moonlight allows you to stream your full collection of games and applications from your PC to other devices to play them remotely.
