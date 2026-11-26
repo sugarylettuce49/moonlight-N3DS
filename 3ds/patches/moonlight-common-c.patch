@@ -1,0 +1,56 @@
+diff --git a/src/PlatformSockets.c b/src/PlatformSockets.c
+index 41e7dd8..39d9880 100644
+--- a/src/PlatformSockets.c
++++ b/src/PlatformSockets.c
+@@ -149,16 +149,21 @@ int pollSockets(struct pollfd* pollFds, int pollFdsCount, int timeoutMs) {
+ 
+     return err;
+ #elif defined(__3DS__)
+-    int err;
+-    u64 poll_start = osGetTime();
+-    for (u64 i = poll_start; (i - poll_start) < timeoutMs; i = osGetTime()) {
+-        err = poll(pollFds, pollFdsCount, 0); // This is running for 14ms
+-        if (err) {
+-            break;
++    if (timeoutMs > 0) {
++        int err;
++        u64 poll_start = osGetTime();
++        for (u64 i = poll_start; (i - poll_start) < (u64)timeoutMs; i = osGetTime()) {
++            err = poll(pollFds, pollFdsCount, 0); // This is running for 14ms
++            if (err) {
++                break;
++            }
++            svcSleepThread(1000);
+         }
+-        svcSleepThread(1000);
++        return err;
++    }
++    else {
++        return poll(pollFds, pollFdsCount, timeoutMs);
+     }
+-    return err;
+ #else
+     return poll(pollFds, pollFdsCount, timeoutMs);
+ #endif
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+index 402b056..fa4b780 100644
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -296,6 +296,17 @@ void stopVideoStream(void) {
+     }
+ 
+     PltJoinThread(&udpPingThread);
++
++#ifdef __3DS__
++    // The 3DS has no SO_RCVTIMEO support, so the receive thread polls the RTP
++    // socket. Close it now (the ping thread that also uses it has exited) so a
++    // receive thread stuck in poll()/recvfrom() wakes up and can be joined.
++    if (rtpSocket != INVALID_SOCKET) {
++        closeSocket(rtpSocket);
++        rtpSocket = INVALID_SOCKET;
++    }
++#endif
++
+     PltJoinThread(&receiveThread);
+     if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+         PltJoinThread(&decoderThread);

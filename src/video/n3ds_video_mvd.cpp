@@ -33,6 +33,15 @@
 
 static std::unique_ptr<MvdDecoder> instance = nullptr;
 
+// mvdstdExit() can block for roughly a minute on some New 3DS / New 2DS XL
+// units, which made leaving a stream look like a hang. Instead of tearing the
+// MVD service down after every stream, keep it alive for the lifetime of the
+// app and reuse it. It is only re-created when a stream needs a larger work
+// buffer than the one it was created with (e.g. switching to a higher
+// resolution), so the slow exit path is hit at most once in that case.
+static bool mvd_service_initialized = false;
+static uint32_t mvd_work_buf_size = 0;
+
 MvdDecoder::MvdDecoder(int videoFormat, int width, int height, int redrawRate,
                        void *context, int drFlags)
     : VideoDecoderBase(width, height) {
@@ -61,14 +70,27 @@ MvdDecoder::MvdDecoder(int videoFormat, int width, int height, int redrawRate,
         throw std::runtime_error("mvdstdCalculateBufferSize failed");
     }
 
-    first_frame = true;
-    status = mvdstdInit(MVDMODE_VIDEOPROCESSING, MVD_INPUT_H264,
-                        MVD_OUTPUT_BGR565, size, NULL);
-    if (status) {
-        fprintf(stderr, "mvdstdInit failed: %d\n", status);
+    if (mvd_service_initialized && size > mvd_work_buf_size) {
+        printf("MVD work buffer too small (%lu < %lu), reinitializing\n",
+               (unsigned long)mvd_work_buf_size, (unsigned long)size);
         mvdstdExit();
-        throw std::runtime_error("mvdstdInit failed");
+        mvd_service_initialized = false;
+        mvd_work_buf_size = 0;
     }
+
+    if (!mvd_service_initialized) {
+        status = mvdstdInit(MVDMODE_VIDEOPROCESSING, MVD_INPUT_H264,
+                            MVD_OUTPUT_BGR565, size, NULL);
+        if (status) {
+            fprintf(stderr, "mvdstdInit failed: %d\n", status);
+            mvdstdExit();
+            throw std::runtime_error("mvdstdInit failed");
+        }
+        mvd_service_initialized = true;
+        mvd_work_buf_size = size;
+    }
+
+    first_frame = true;
 
     rgb_img_buffer = (u8 *)linearAlloc(MOON_CTR_VIDEO_TEX_W *
                                        MOON_CTR_VIDEO_TEX_H * pixel_size);
@@ -99,9 +121,13 @@ MvdDecoder::MvdDecoder(int videoFormat, int width, int height, int redrawRate,
 // decoding is finished
 MvdDecoder::~MvdDecoder() {
     y2rExit();
-    mvdstdExit();
+    // mvdstdExit() is intentionally not called here; see the comment on
+    // mvd_service_initialized. The next stream reuses the service and applies
+    // a fresh MVDSTD config, and the OS reclaims it when the app closes.
     linearFree(nal_unit_buffer);
+    nal_unit_buffer = nullptr;
     linearFree(rgb_img_buffer);
+    rgb_img_buffer = nullptr;
     printf("Video decoder shutdown successfully\n");
 }
 
