@@ -228,14 +228,15 @@ else
 endif
 
 #---------------------------------------------------------------------------------
-patches:
-	@sh $(CURDIR)/3ds/apply-patches.sh
-
 all: patches $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 	@$(BANNERTOOL) makebanner $(BANNER_IMAGE_ARG) "$(BANNER_IMAGE)" $(BANNER_AUDIO_ARG) "$(BANNER_AUDIO)" -o "$(BUILD)/banner.bnr"
 	@$(BANNERTOOL) makesmdh -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" -i "$(APP_ICON)" -f "$(ICON_FLAGS)" -o "$(BUILD)/icon.icn"
 	$(MAKEROM) -f cia -o "$(OUTPUT).cia" -target t -exefslogo $(MAKEROM_ARGS)
+
+# Must stay below "all" so that a plain `make` still builds everything
+patches:
+	@sh $(CURDIR)/3ds/apply-patches.sh
 
 $(BUILD):
 	@mkdir -p $@
