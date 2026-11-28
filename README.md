@@ -1,6 +1,10 @@
-Thanks nanni2810-ux/moonlight-N3DS
+The original fork fixes the disconnect glitch. Unfortunately when they fixed disconnecting they broke connecting.
 
-I literally changed nothing all I did was actually publish the cia file.
+Basically had Claude fix that, making connecting work based on the og project while keeping the disconnect fix, as well as some other things.
+
+Yes it's AI assisted, you're either hungry or you're not.
+
+
 
 # Moonlight for the \*New\* Nintendo 3DS
 
