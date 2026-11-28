@@ -32,14 +32,27 @@ N3dsRendererTop::N3dsRendererTop(int dest_width, int dest_height, int src_width,
                        px_size, debug_in) {}
 
 void N3dsRendererTop::write_px_to_framebuffer(uint8_t *source) {
-    // TODO: Add logic for stretching 400px images to fit 2 400px screen buffers
-    if (osGet3DSliderState() > 0.0 &&
-        surface_width >= GSP_SCREEN_HEIGHT_TOP_2X) {
-        ensure_3d_enabled();
-    } else {
-        ensure_3d_disabled();
+    float slider = osGet3DSliderState();
+    StereoRender stereo = StereoRender::MONO;
+    if (slider > 0.0f) {
+        switch (n3ds_stereo_3d_mode) {
+        case STEREO_3D_POPOUT:
+            stereo = StereoRender::POPOUT;
+            break;
+        case STEREO_3D_SIDE_BY_SIDE:
+            stereo = StereoRender::SIDE_BY_SIDE;
+            break;
+        default:
+            break;
+        }
     }
-    write_px_to_framebuffer_gpu(source);
+
+    if (stereo == StereoRender::MONO) {
+        ensure_3d_disabled();
+    } else {
+        ensure_3d_enabled();
+    }
+    write_px_to_framebuffer_gpu(source, stereo, slider);
 }
 
 void N3dsRendererTop::set_perf_decode_ticks(u64 ticks) {

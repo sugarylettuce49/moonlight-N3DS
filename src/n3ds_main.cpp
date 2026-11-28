@@ -204,6 +204,23 @@ prompt_for_video_decoder(VIDEO_DECODER_TYPE default_val) {
     return (VIDEO_DECODER_TYPE)idx;
 }
 
+static STEREO_3D_MODE prompt_for_stereo_3d_mode(STEREO_3D_MODE default_val) {
+    std::vector<std::string> modes = {
+        "pop-out (any content)",
+        "side-by-side (PC sends SBS 3D)",
+        "off",
+    };
+    int idx = console_selection_prompt(
+        "3D slider mode\n\npop-out: the flat stream floats out of the\n"
+        "screen; the slider sets how far.\n"
+        "side-by-side: real 3D, needs SBS output\nfrom the PC.",
+        modes, (int)default_val);
+    if (idx < 0) {
+        return default_val;
+    }
+    return (STEREO_3D_MODE)idx;
+}
+
 static bool prompt_for_boolean(std::string prompt, bool default_val) {
     std::vector<std::string> options = {
         "true",
@@ -247,6 +264,7 @@ static void prompt_for_stream_settings(PCONFIGURATION config) {
         "swapfacebuttons",
         "swaptriggersandshoulders",
         "usetriggersformouse",
+        "stereo_3d",
     };
     int idx = 0;
     while (1) {
@@ -310,6 +328,9 @@ static void prompt_for_stream_settings(PCONFIGURATION config) {
             config->use_triggers_for_mouse =
                 prompt_for_boolean("Use ZL/ZR as left/right mouse buttons",
                                    config->use_triggers_for_mouse);
+        } else if ("stereo_3d" == setting_names[idx]) {
+            config->stereo_3d_mode =
+                prompt_for_stereo_3d_mode(config->stereo_3d_mode);
         }
     }
 
@@ -465,6 +486,8 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, int appId,
         config->video_decoder, config->swap_face_buttons,
         config->swap_triggers_and_shoulders, config->use_triggers_for_mouse,
         config->motion_controls);
+
+    n3ds_stereo_3d_mode = config->stereo_3d_mode;
 
     auto connection_listener =
         N3dsConnectionListener::create_instance(config->motion_controls);

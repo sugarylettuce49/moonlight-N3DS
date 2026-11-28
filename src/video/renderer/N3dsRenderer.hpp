@@ -18,6 +18,7 @@
  */
 #pragma once
 
+#include "../../config.hpp"
 #include "../../system/AtomicVar.hpp"
 #include "../../system/subscriber.hpp"
 #include <3ds.h>
@@ -30,6 +31,17 @@
 // offsets work
 #define MOON_CTR_VIDEO_TEX_H_OFFSET 32
 #define CMDLIST_SZ 0x800
+
+// Maximum per-eye horizontal offset (in top screen pixels) used by the
+// pop-out 3D mode at full slider. The image is shrunk by this much so it is
+// never cropped at any slider position.
+#define MOON_CTR_POPOUT_MAX_PARALLAX 20
+
+enum class StereoRender {
+    MONO,         // Normal 2D output
+    SIDE_BY_SIDE, // Left half of the image -> left eye, right half -> right
+    POPOUT,       // Whole image to both eyes, offset to float off the screen
+};
 
 class IN3dsRenderer {
   public:
@@ -48,7 +60,10 @@ class N3dsRendererBase {
 
   protected:
     inline void draw_perf_counters();
-    void write_px_to_framebuffer_gpu(uint8_t *__restrict source);
+    // depth is the 3D slider value (0.0 - 1.0), only used for POPOUT
+    void write_px_to_framebuffer_gpu(uint8_t *__restrict source,
+                                     StereoRender stereo = StereoRender::MONO,
+                                     float depth = 0.0f);
     void ensure_3d_enabled();
     void ensure_3d_disabled();
     inline void write24(u8 *p, u32 val);

@@ -27,6 +27,8 @@
 #include <stdexcept>
 #include <unistd.h>
 
+STEREO_3D_MODE n3ds_stereo_3d_mode = STEREO_3D_POPOUT;
+
 N3dsRendererBase::N3dsRendererBase(gfxScreen_t screen_in, int surface_width_in,
                                    int surface_height_in, int image_width_in,
                                    int image_height_in, int pixel_size,
@@ -35,7 +37,10 @@ N3dsRendererBase::N3dsRendererBase(gfxScreen_t screen_in, int surface_width_in,
       surface_height(surface_height_in), image_width(image_width_in),
       image_height(image_height_in), debug(debug_in), px_size(pixel_size) {
     cmdlist = (u32 *)linearAlloc(CMDLIST_SZ * 4);
-    vramFb = vramAlloc(surface_width * surface_height * px_size);
+    // In 3D, the top screen always renders both eyes (2 x 400px) into this
+    // buffer, even for 400px wide streams
+    int fb_width = (screen == GFX_TOP) ? GSP_SCREEN_HEIGHT_TOP_2X : surface_width;
+    vramFb = vramAlloc(fb_width * surface_height * px_size);
     // Needs to be able to hold an 800x480
     vramTex = vramAlloc(MOON_CTR_VIDEO_TEX_W * MOON_CTR_VIDEO_TEX_H * px_size);
 }
@@ -49,6 +54,12 @@ N3dsRendererBase::~N3dsRendererBase() {
     u8 *framebuf = gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
     memset(framebuf, 0, surface_width * surface_height * px_size);
     gfxScreenSwapBuffers(screen, true);
+
+    // Leave 3D mode, otherwise the menus would keep showing the last stream
+    // frame in the right eye
+    if (screen == GFX_TOP && gfxIs3D()) {
+        gfxSet3D(false);
+    }
 
     // Return to the default display width before exiting
     if (surface_width == GSP_SCREEN_HEIGHT_TOP_2X) {
@@ -110,12 +121,23 @@ inline void N3dsRendererBase::draw_perf_counters() {
     PERF_DRAW(0, 0, 255, 0);
 }
 
-void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
+void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source,
+                                                   StereoRender stereo,
+                                                   float depth) {
     // Do nothing when GPU right is lost, otherwise we hang when going to
     // the home menu.
     if (!gspHasGpuRight()) {
         return;
     }
+
+    if (screen != GFX_TOP) {
+        stereo = StereoRender::MONO;
+    }
+    bool is_3d = stereo != StereoRender::MONO;
+
+    // In 3D both eyes are rendered into one 800px tall (rotated) buffer:
+    // the first 400px become the left eye, the last 400px the right eye.
+    int render_width = is_3d ? GSP_SCREEN_HEIGHT_TOP_2X : surface_width;
 
     u64 start_ticks = svcGetSystemTick();
 
@@ -137,6 +159,14 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
             GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) |
             GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565));
 
+    // Pop-out mode leaves black borders around each eye's image, so clear the
+    // render buffer first (the draw below only touches the image area)
+    if (stereo == StereoRender::POPOUT) {
+        u32 fb_bytes = render_width * surface_height * px_size;
+        GX_MemoryFill((u32 *)vramFb, 0, (u32 *)((u8 *)vramFb + fb_bytes),
+                      GX_FILL_TRIGGER | GX_FILL_16BIT_DEPTH, NULL, 0, NULL, 0);
+    }
+
     // While the transfer is running, create a temporary command list to rotate
     // the framebuffer into source
     GPUCMD_SetBuffer(cmdlist, CMDLIST_SZ, 0);
@@ -149,9 +179,9 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     C(GPUREG_COLORBUFFER_LOC, osConvertVirtToPhys(vramFb) >> 3);
     C(GPUREG_DEPTHBUFFER_LOC, 0);
     C(GPUREG_RENDERBUF_DIM,
-      (1 << 24) | ((surface_width - 1) << 12) | surface_height);
+      (1 << 24) | ((render_width - 1) << 12) | surface_height);
     C(GPUREG_FRAMEBUFFER_DIM,
-      (1 << 24) | ((surface_width - 1) << 12) | surface_height);
+      (1 << 24) | ((render_width - 1) << 12) | surface_height);
     C(GPUREG_FRAMEBUFFER_BLOCK32, 0);
 
     C(GPUREG_DEPTH_COLOR_MASK, 0xF << 8); // Write RGBA, no depth
@@ -168,8 +198,8 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
 
     C(GPUREG_VIEWPORT_WIDTH, f32tof24(surface_height / 2));
     C(GPUREG_VIEWPORT_INVW, f32tof31(2.0 / ((double)surface_height)) << 1);
-    C(GPUREG_VIEWPORT_HEIGHT, f32tof24(surface_width / 2));
-    C(GPUREG_VIEWPORT_INVH, f32tof31(2.0 / ((double)surface_width)) << 1);
+    C(GPUREG_VIEWPORT_HEIGHT, f32tof24(render_width / 2));
+    C(GPUREG_VIEWPORT_INVH, f32tof31(2.0 / ((double)render_width)) << 1);
 
     C(GPUREG_SCISSORTEST_MODE, 0);
     C(GPUREG_SCISSORTEST_POS, 0);
@@ -187,8 +217,12 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     C(GPUREG_TEXUNIT0_TYPE, GPU_RGB565);
     C(GPUREG_TEXUNIT0_DIM, MOON_CTR_VIDEO_TEX_H | (MOON_CTR_VIDEO_TEX_W << 16));
     C(GPUREG_TEXUNIT0_ADDR1, osConvertVirtToPhys(vramTex) >> 3);
+    // Pop-out shrinks the image ~2x horizontally, so also filter when
+    // minifying there to avoid shimmering
     C(GPUREG_TEXUNIT0_PARAM,
-      GPU_NEAREST | (GPU_LINEAR << 1)); // Linear min and mag filter
+      GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) |
+          GPU_TEXTURE_MIN_FILTER(stereo == StereoRender::POPOUT ? GPU_LINEAR
+                                                                : GPU_NEAREST));
 
     // Shading
     // GPUCMD_AddMaskedWrite(GPUREG_SH_OUTATTR_CLOCK, 0x2, 1 << 8); // No Z, Yes
@@ -291,17 +325,56 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     // float hw = 2.0f / surface_height;
     float hh = 2.0f / surface_width;
 
-    ATTR(1.0, -1.0, 0.0, 0.0); // TR
-    ATTR(sw, -hh, 0.0, 0.0);
+    // The buffer is rotated: clip X runs along the 240px screen height and
+    // clip Y along the screen width, with Y = +1 at the left edge of the
+    // screen. In 3D, Y in [0, 1] is the left eye and Y in [-1, 0] the right.
+    //
+    // Draws the whole image as a quad: image left edge at clip Y = y_left,
+    // right edge at y_right, vertically spanning clip X in [-k, k].
+#define IMAGE_QUAD(y_left, y_right, k)                                         \
+    {                                                                          \
+        ATTR((k), (y_right), 0.0, 0.0); /* TR */                               \
+        ATTR(sw, -hh, 0.0, 0.0);                                               \
+        ATTR(-(k), (y_right), 0.0, 0.0); /* TL */                              \
+        ATTR(sw, sh, 0.0, 0.0);                                                \
+        ATTR((k), (y_left), 0.0, 0.0); /* BR */                                \
+        ATTR(0.0, -hh, 0.0, 0.0);                                              \
+        ATTR(-(k), (y_left), 0.0, 0.0); /* BL */                               \
+        ATTR(0.0, sh, 0.0, 0.0);                                               \
+    }
 
-    ATTR(-1.0, -1.0, 0.0, 0.0); // TL
-    ATTR(sw, sh, 0.0, 0.0);
+    if (stereo == StereoRender::POPOUT) {
+        // Each eye gets the full image, shrunk to leave room for the offset
+        // so nothing is ever cropped. The left eye's copy is moved right and
+        // the right eye's copy moved left (crossed disparity), which makes
+        // the flat image appear in front of the screen.
+        const float eye_w = GSP_SCREEN_HEIGHT_TOP; // 400px per eye
+        const float max_d = MOON_CTR_POPOUT_MAX_PARALLAX;
+        float d = depth * max_d;
+        if (d < 0.0f)
+            d = 0.0f;
+        if (d > max_d)
+            d = max_d;
+        float img_w = eye_w - max_d;
+        float k = img_w / eye_w;
 
-    ATTR(1.0, 1.0, 0.0, 0.0); // BR
-    ATTR(0.0, -hh, 0.0, 0.0);
+        // Left edge of the image within each eye, in screen pixels
+        float left_x = (max_d + d) / 2.0f;
+        float right_x = (max_d - d) / 2.0f;
 
-    ATTR(-1.0, 1.0, 0.0, 0.0); // BL
-    ATTR(0.0, sh, 0.0, 0.0);
+        // Left eye: screen x -> clip Y = 1 - x / 400
+        IMAGE_QUAD(1.0f - left_x / eye_w, 1.0f - (left_x + img_w) / eye_w,
+                   k);
+        C(GPUREG_RESTART_PRIMITIVE, 1);
+        // Right eye: screen x -> clip Y = -x / 400
+        IMAGE_QUAD(-right_x / eye_w, -(right_x + img_w) / eye_w, k);
+    } else {
+        // Full screen. In side-by-side mode this naturally puts the left
+        // half of the image in the left eye and the right half in the right.
+        IMAGE_QUAD(1.0f, -1.0f, 1.0f);
+    }
+
+#undef IMAGE_QUAD
 
     // End Geometry Pipeline
     GPUCMD_AddMaskedWrite(GPUREG_START_DRAW_FUNC0, 1, 1);
@@ -316,6 +389,9 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
 #undef C
 
     gspWaitForEvent(GSPGPU_EVENT_PPF, 0);
+    if (stereo == StereoRender::POPOUT) {
+        gspWaitForEvent(GSPGPU_EVENT_PSC0, 0);
+    }
 
     u32 *unused;
     u32 cmdlist_len;
@@ -332,11 +408,11 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     gspWaitForEvent(GSPGPU_EVENT_P3D, 0);
 
     // Copy into framebuffer, untiled
-    if ((screen == GFX_TOP) && gfxIs3D()) {
+    if (is_3d && gfxIs3D()) {
         // Left
         u32 *dest_left =
             (u32 *)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-        auto surface_width_3d = surface_width / 2;
+        auto surface_width_3d = GSP_SCREEN_HEIGHT_TOP;
         GX_DisplayTransfer(
             (u32 *)vramFb, GX_BUFFER_DIM(surface_height, surface_width_3d),
             dest_left, GX_BUFFER_DIM(surface_height, surface_width_3d),
@@ -349,7 +425,7 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
         u32 *dest_right =
             (u32 *)gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
         auto surface_offset_3d =
-            surface_height * surface_width * px_size / (sizeof(u32) * 2);
+            surface_height * surface_width_3d * px_size / sizeof(u32);
         GX_DisplayTransfer((u32 *)vramFb + surface_offset_3d,
                            GX_BUFFER_DIM(surface_height, surface_width_3d),
                            dest_right,

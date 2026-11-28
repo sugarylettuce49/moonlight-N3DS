@@ -31,6 +31,21 @@ enum VIDEO_DECODER_TYPE {
     DISABLE_VIDEO_DECODER
 };
 
+// What the top screen does when the 3D slider is raised
+enum STEREO_3D_MODE {
+    // Show the full image to both eyes with a small horizontal offset, so the
+    // flat stream floats in front of the screen. Works with any content.
+    STEREO_3D_POPOUT = 0,
+    // The host sends side-by-side 3D (left half = left eye, right half =
+    // right eye), e.g. a game's SBS mode or a ReShade 3D shader.
+    STEREO_3D_SIDE_BY_SIDE,
+    // Ignore the 3D slider and always show 2D.
+    STEREO_3D_OFF,
+};
+
+// Active 3D mode used by the top screen renderer (set when a stream starts)
+extern STEREO_3D_MODE n3ds_stereo_3d_mode;
+
 typedef struct _CONFIGURATION {
     STREAM_CONFIGURATION stream;
     char *app;
@@ -56,6 +71,7 @@ typedef struct _CONFIGURATION {
     bool swap_face_buttons;
     bool swap_triggers_and_shoulders;
     bool use_triggers_for_mouse;
+    STEREO_3D_MODE stereo_3d_mode;
 } CONFIGURATION, *PCONFIGURATION;
 
 bool config_file_parse(char *filename, PCONFIGURATION config);
