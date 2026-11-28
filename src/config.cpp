@@ -54,6 +54,7 @@ static struct option long_options[] = {
     {"swaptriggersandshoulders", required_argument, NULL, 'B'},
     {"usetriggersformouse", required_argument, NULL, 'C'},
     {"stereo_3d", required_argument, NULL, 'D'},
+    {"audio_gain_db", required_argument, NULL, 'E'},
     {0, 0, 0, 0},
 };
 
@@ -123,6 +124,14 @@ void parse_argument(int c, char *value, PCONFIGURATION config) {
         }
         config->stereo_3d_mode = (STEREO_3D_MODE)mode;
     } break;
+    case 'E': {
+        int gain = (value == NULL) ? AUDIO_GAIN_DB_DEFAULT : atoi(value);
+        if (gain < AUDIO_GAIN_DB_MIN)
+            gain = AUDIO_GAIN_DB_MIN;
+        if (gain > AUDIO_GAIN_DB_MAX)
+            gain = AUDIO_GAIN_DB_MAX;
+        config->audio_gain_db = gain;
+    } break;
     case 1:
         if (config->action == NULL)
             config->action = value;
@@ -183,6 +192,7 @@ void config_save(char *filename, PCONFIGURATION config) {
                       config->use_triggers_for_mouse);
     write_config_bool(fd, "motion_controls", config->motion_controls);
     write_config_int(fd, "stereo_3d", config->stereo_3d_mode);
+    write_config_int(fd, "audio_gain_db", config->audio_gain_db);
 
     if (strcmp(config->app, "Steam") != 0)
         write_config_string(fd, "app", config->app);
@@ -224,6 +234,7 @@ void config_parse(int argc, char *argv[], PCONFIGURATION config) {
     config->swap_triggers_and_shoulders = false;
     config->use_triggers_for_mouse = false;
     config->stereo_3d_mode = STEREO_3D_POPOUT;
+    config->audio_gain_db = AUDIO_GAIN_DB_DEFAULT;
 
     config_file_parse(config);
 

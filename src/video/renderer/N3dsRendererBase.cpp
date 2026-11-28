@@ -135,8 +135,8 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source,
     }
     bool is_3d = stereo != StereoRender::MONO;
 
-    // In 3D both eyes are rendered into one 800px tall (rotated) buffer:
-    // the first 400px become the left eye, the last 400px the right eye.
+    // In 3D both eyes are rendered into one 800px tall (rotated) buffer,
+    // 400px per eye (see the copy at the end for which half is which).
     int render_width = is_3d ? GSP_SCREEN_HEIGHT_TOP_2X : surface_width;
 
     u64 start_ticks = svcGetSystemTick();
@@ -409,24 +409,31 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source,
 
     // Copy into framebuffer, untiled
     if (is_3d && gfxIs3D()) {
-        // Left
+        // The first half of the render buffer holds the clip Y [-1, 0]
+        // region and the second half clip Y [0, 1]. Clip Y [0, 1] is the
+        // left eye's image (see IMAGE_QUAD above), so the halves are swapped
+        // here. Verified on hardware: copying the first half to the left
+        // eye made pop-out depth appear inverted.
+        auto surface_width_3d = GSP_SCREEN_HEIGHT_TOP;
+        auto surface_offset_3d =
+            surface_height * surface_width_3d * px_size / sizeof(u32);
+
+        // Left eye <- second half
         u32 *dest_left =
             (u32 *)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-        auto surface_width_3d = GSP_SCREEN_HEIGHT_TOP;
         GX_DisplayTransfer(
-            (u32 *)vramFb, GX_BUFFER_DIM(surface_height, surface_width_3d),
-            dest_left, GX_BUFFER_DIM(surface_height, surface_width_3d),
+            (u32 *)vramFb + surface_offset_3d,
+            GX_BUFFER_DIM(surface_height, surface_width_3d), dest_left,
+            GX_BUFFER_DIM(surface_height, surface_width_3d),
             GX_TRANSFER_OUT_TILED(0) |
                 GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) |
                 GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) |
                 GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
 
-        // Right
+        // Right eye <- first half
         u32 *dest_right =
             (u32 *)gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
-        auto surface_offset_3d =
-            surface_height * surface_width_3d * px_size / sizeof(u32);
-        GX_DisplayTransfer((u32 *)vramFb + surface_offset_3d,
+        GX_DisplayTransfer((u32 *)vramFb,
                            GX_BUFFER_DIM(surface_height, surface_width_3d),
                            dest_right,
                            GX_BUFFER_DIM(surface_height, surface_width_3d),

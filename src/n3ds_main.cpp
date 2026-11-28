@@ -241,6 +241,20 @@ prompt_for_video_decoder(VIDEO_DECODER_TYPE default_val) {
     return (VIDEO_DECODER_TYPE)idx;
 }
 
+static int prompt_for_audio_gain(int default_val) {
+    std::vector<std::string> options;
+    for (int db = AUDIO_GAIN_DB_MIN; db <= AUDIO_GAIN_DB_MAX; db++) {
+        options.push_back("+" + std::to_string(db) + " dB");
+    }
+    int idx = console_selection_prompt(
+        "Audio volume boost\n(loud peaks are limited, not clipped)", options,
+        default_val - AUDIO_GAIN_DB_MIN);
+    if (idx < 0) {
+        return default_val;
+    }
+    return AUDIO_GAIN_DB_MIN + idx;
+}
+
 static STEREO_3D_MODE prompt_for_stereo_3d_mode(STEREO_3D_MODE default_val) {
     std::vector<std::string> modes = {
         "pop-out (any content)",
@@ -302,6 +316,7 @@ static void prompt_for_stream_settings(PCONFIGURATION config) {
         "swaptriggersandshoulders",
         "usetriggersformouse",
         "stereo_3d",
+        "audio_gain_db",
     };
     int idx = 0;
     while (1) {
@@ -368,6 +383,8 @@ static void prompt_for_stream_settings(PCONFIGURATION config) {
         } else if ("stereo_3d" == setting_names[idx]) {
             config->stereo_3d_mode =
                 prompt_for_stereo_3d_mode(config->stereo_3d_mode);
+        } else if ("audio_gain_db" == setting_names[idx]) {
+            config->audio_gain_db = prompt_for_audio_gain(config->audio_gain_db);
         }
     }
 
@@ -525,6 +542,7 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, int appId,
         config->motion_controls);
 
     n3ds_stereo_3d_mode = config->stereo_3d_mode;
+    n3ds_audio_gain_db = config->audio_gain_db;
 
     auto connection_listener =
         N3dsConnectionListener::create_instance(config->motion_controls);

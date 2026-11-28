@@ -25,3 +25,6 @@
 
 extern AUDIO_RENDERER_CALLBACKS audio_callbacks_mock;
 extern AUDIO_RENDERER_CALLBACKS audio_callbacks_n3ds;
+
+// Extra volume applied to decoded audio, in dB (set before a stream starts)
+extern int n3ds_audio_gain_db;

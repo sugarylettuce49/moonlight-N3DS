@@ -37,6 +37,70 @@ static int channelCount;
 static ndspWaveBuf audio_wave_buf[WAVEBUF_SIZE];
 static int wave_buf_idx = 0;
 
+// --- Volume boost with a simple peak limiter ---
+// The boost is applied in software after decoding. To avoid harsh clipping
+// on loud moments, the gain for each audio frame is capped so the frame's
+// loudest sample stays at full scale, then eased back up to the requested
+// boost once things get quieter.
+int n3ds_audio_gain_db = 10;
+#define GAIN_RELEASE_DB_PER_SEC 8.0f
+
+static float gain_target = 1.0f;  // Requested boost (linear)
+static float gain_current = 1.0f; // Gain applied at the end of the last frame
+static float gain_release = 1.0f; // Per-frame multiplier when recovering
+
+static void gain_init(int samples_per_frame, int sample_rate) {
+    int db = n3ds_audio_gain_db;
+    if (db < 0)
+        db = 0;
+    if (db > 20)
+        db = 20;
+    gain_target = powf(10.0f, db / 20.0f);
+    gain_current = gain_target;
+
+    float frame_sec = (float)samples_per_frame / (float)sample_rate;
+    gain_release = powf(10.0f, GAIN_RELEASE_DB_PER_SEC * frame_sec / 20.0f);
+}
+
+static void gain_apply(opus_int16 *samples, int count) {
+    if (gain_target <= 1.0f || count <= 0) {
+        return; // +0 dB: leave the audio untouched
+    }
+
+    int peak = 0;
+    for (int i = 0; i < count; i++) {
+        int a = abs(samples[i]);
+        if (a > peak)
+            peak = a;
+    }
+
+    // Highest gain that keeps this frame from clipping
+    float safe = (peak > 0) ? 32767.0f / (float)peak : gain_target;
+
+    // Recover slowly towards the requested boost, but never above "safe"
+    float next = gain_current * gain_release;
+    if (next > gain_target)
+        next = gain_target;
+    if (next > safe)
+        next = safe;
+
+    // Ramp smoothly when the gain rises; drop instantly when it must fall so
+    // the start of a loud frame can't clip
+    float start = (next < gain_current) ? next : gain_current;
+    float step = (next - start) / (float)count;
+    float g = start;
+    for (int i = 0; i < count; i++) {
+        float v = samples[i] * g;
+        if (v > 32767.0f)
+            v = 32767.0f;
+        else if (v < -32768.0f)
+            v = -32768.0f;
+        samples[i] = (opus_int16)v;
+        g += step;
+    }
+    gain_current = next;
+}
+
 static int n3ds_renderer_init(int audioConfiguration,
                               POPUS_MULTISTREAM_CONFIGURATION opusConfig,
                               void *context, int arFlags) {
@@ -49,6 +113,7 @@ static int n3ds_renderer_init(int audioConfiguration,
     channelCount = opusConfig->channelCount;
     samplesPerFrame = opusConfig->samplesPerFrame;
     int bytes_per_frame = sizeof(short) * channelCount * samplesPerFrame;
+    gain_init(samplesPerFrame, sampleRate);
 
     if (ndspInit() != 0) {
         fprintf(stderr, "ndspInit() failed\n");
@@ -113,6 +178,8 @@ static void n3ds_renderer_decode_and_play_sample(char *data, int length) {
         fprintf(stderr, "Opus error from decode: %d\n", decodeLen);
         return;
     }
+    gain_apply((opus_int16 *)audio_wave_buf[wave_buf_idx].data_vaddr,
+               decodeLen * channelCount);
     DSP_FlushDataCache(audio_wave_buf[wave_buf_idx].data_vaddr,
                        decodeLen * channelCount * sizeof(short));
     audio_wave_buf[wave_buf_idx].nsamples = decodeLen;

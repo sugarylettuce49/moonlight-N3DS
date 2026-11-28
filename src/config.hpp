@@ -46,6 +46,11 @@ enum STEREO_3D_MODE {
 // Active 3D mode used by the top screen renderer (set when a stream starts)
 extern STEREO_3D_MODE n3ds_stereo_3d_mode;
 
+// Extra audio volume applied by the 3DS audio renderer, in dB
+#define AUDIO_GAIN_DB_MIN 0
+#define AUDIO_GAIN_DB_MAX 20
+#define AUDIO_GAIN_DB_DEFAULT 10
+
 typedef struct _CONFIGURATION {
     STREAM_CONFIGURATION stream;
     char *app;
@@ -72,6 +77,7 @@ typedef struct _CONFIGURATION {
     bool swap_triggers_and_shoulders;
     bool use_triggers_for_mouse;
     STEREO_3D_MODE stereo_3d_mode;
+    int audio_gain_db;
 } CONFIGURATION, *PCONFIGURATION;
 
 bool config_file_parse(char *filename, PCONFIGURATION config);
