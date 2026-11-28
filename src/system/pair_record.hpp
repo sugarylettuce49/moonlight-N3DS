@@ -28,5 +28,8 @@
 void trim(std::string &s);
 void add_pair_address(std::string address, uint16_t port);
 void remove_pair_address(std::string address, uint16_t port);
+// Removes a saved "address:port" entry exactly as list_paired_addresses()
+// returns it. Does not contact the host (works for unreachable hosts).
+void remove_pair_entry(std::string entry);
 std::vector<std::string> list_paired_addresses();
 #endif

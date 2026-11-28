@@ -166,14 +166,51 @@ static std::string prompt_for_action(PSERVER_DATA server) {
     return actions[idx];
 }
 
+// Lets the user delete saved addresses without connecting to them, so dead
+// hosts can be cleaned up. This only forgets the address on the 3DS; it does
+// not unpair on the PC side.
+static void prompt_for_address_removal() {
+    while (aptMainLoop()) {
+        auto address_list = list_paired_addresses();
+        if (address_list.empty()) {
+            printf("No saved addresses\n");
+            wait_for_button();
+            return;
+        }
+
+        int idx = console_selection_prompt(
+            "Select an address to remove\n(B when done)", address_list, 0);
+        if (idx < 0) {
+            return;
+        }
+
+        std::vector<std::string> confirm = {"no", "yes, remove it"};
+        int choice = console_selection_prompt(
+            "Remove " + address_list[idx] + "?", confirm, 0);
+        if (choice == 1) {
+            remove_pair_entry(address_list[idx]);
+        }
+    }
+}
+
 static std::string prompt_for_address() {
+    const std::string new_option = "new";
+    const std::string remove_option = "remove saved address";
+
     auto address_list = list_paired_addresses();
-    address_list.push_back("new");
+    bool has_saved = !address_list.empty();
+    address_list.push_back(new_option);
+    if (has_saved) {
+        address_list.push_back(remove_option);
+    }
     int idx =
         console_selection_prompt("Select a server address", address_list, 0);
     if (idx < 0) {
         return "";
-    } else if (address_list[idx] != "new") {
+    } else if (has_saved && idx == (int)address_list.size() - 1) {
+        prompt_for_address_removal();
+        return "";
+    } else if (idx != (int)address_list.size() - (has_saved ? 2 : 1)) {
         return address_list[idx];
     }
 

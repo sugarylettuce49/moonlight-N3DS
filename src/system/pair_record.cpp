@@ -73,14 +73,21 @@ void add_pair_address(std::string address, uint16_t port) {
 }
 
 void remove_pair_address(std::string address, uint16_t port) {
-    address += ":" + std::to_string(port);
+    remove_pair_entry(address + ":" + std::to_string(port));
+}
 
+void remove_pair_entry(std::string address) {
+    trim(address);
     auto address_list = list_paired_addresses();
 
     char *address_file = (char *)MOONLIGHT_3DS_PATH "/paired";
     remove(address_file);
 
     FILE *fd = fopen(address_file, "w");
+    if (fd == NULL) {
+        fprintf(stderr, "Can't write %s\n", address_file);
+        return;
+    }
     for (auto addr_string : address_list) {
         if (addr_string != address) {
             trim(addr_string);
@@ -96,7 +103,10 @@ std::vector<std::string> list_paired_addresses() {
     std::string line;
     while (std::getline(pair_file, line)) {
         trim(line);
-        addresses.push_back(line);
+        // Skip blank lines so they don't show up as empty menu entries
+        if (!line.empty()) {
+            addresses.push_back(line);
+        }
     }
     return addresses;
 }
